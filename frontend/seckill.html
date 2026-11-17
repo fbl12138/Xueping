@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>学评 · 抢课</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <div>
+                <h1 id="courseName">加载中...</h1>
+                <div class="sub" id="statusText">—</div>
+            </div>
+            <a class="btn btn-ghost btn-sm" href="index.html">返回列表</a>
+        </div>
+
+        <div class="card">
+            <div>剩余名额：<span class="stock" id="stock">-</span></div>
+            <div class="countdown" id="countdown">-</div>
+            <button class="btn" id="seckillBtn" style="width:100%; margin-top:14px;" disabled>抢课</button>
+            <p class="msg" id="msg"></p>
+        </div>
+
+        <div class="card">
+            <a id="detailLink" href="#">查看这门课的评价 →</a>
+        </div>
+    </div>
+
+    <script>
+        const API = "http://127.0.0.1:5242";
+
+        // 1. 从 URL 问号后面取 courseId：seckill.html?courseId=1
+        const params = new URLSearchParams(location.search);
+        const courseId = params.get("courseId");
+        const token = localStorage.getItem("token");
+
+        // 2. 没登录就踢回登录页（跟 index.html 一样的套路）
+        if (!token) {
+            window.location.href = "login.html";
+        }
+
+        const headers = { "Authorization": "Bearer " + token };
+        const btn = document.getElementById("seckillBtn");
+        const msgEl = document.getElementById("msg");
+        const cdEl = document.getElementById("countdown");
+
+        let quota = null;
+        let done = false;    // 已抢到：锁死按钮，避免倒计时把它重新解禁
+        let pending = false; // 已受理、后台还在生成记录：按钮显示“排队中”，同样不能被解禁
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        function say(text, type) {
+            msgEl.className = "msg" + (type ? " " + type : "");
+            msgEl.innerText = text;
+        }
+
+        function fmt(ms) {
+            const h = Math.floor(ms / 3600000);
+            const m = Math.floor(ms % 3600000 / 60000);
+            const s = Math.floor(ms % 60000 / 1000);
+            return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+        }
+
+        // 3. 带 token 并行拉课程 + 配额（配额也是 [Authorize]，要带 token）
+        (async function init() {
+            try {
+                const [courseResp, quotaResp] = await Promise.all([
+                    fetch(API + "/api/Course/" + courseId, { headers: headers }),
+                    fetch(API + "/api/CourseSelection/quota/" + courseId, { method: "POST", headers: headers })
+                ]);
+
+                // 401 就踢下线（跟 index.html 一样的套路）
+                if (courseResp.status === 401 || quotaResp.status === 401) {
+                    localStorage.removeItem("token");
+                    window.location.href = "login.html";
+                    return;
+                }
+
+                const course = await courseResp.json();
+                const quotaResult = await quotaResp.json();
+                if (!course.success || !quotaResult.success) {
+                    say(course.errorMsg || quotaResult.errorMsg || "加载失败", "err");
+                    return;
+                }
+
+                // 4. 渲染课程名 + 进入倒计时循环
+                document.getElementById("courseName").innerText = course.data.name;
+                document.getElementById("detailLink").href = "detail.html?courseId=" + courseId;
+                quota = quotaResult.data;
+
+                refresh();
+                setInterval(refresh, 1000);
+            } catch (e) {
+                say("网络异常，请确认后端已启动", "err");
+            }
+        })();
+
+        // 5. 每秒刷新：名额 / 状态 / 按钮可用性
+        function refresh() {
+            if (!quota) return;
+            document.getElementById("stock").innerText = quota.stock;
+
+            if (quota.ended) {
+                btn.disabled = true;
+                btn.innerText = "已结束";
+                cdEl.innerText = "活动已结束";
+                document.getElementById("statusText").innerText = "已结束";
+                return;
+            }
+
+            const now = Date.now();
+            const begin = new Date(quota.beginTime).getTime();
+
+            if (!quota.started) {
+                // 未开始：按钮禁用 + 显示还差多久
+                const ms = begin - now;
+                if (ms <= 0) { location.reload(); return; }   // 到点了，重拉状态
+                cdEl.innerText = "距开始 " + fmt(ms);
+                document.getElementById("statusText").innerText = "未开始";
+                if (!done && !pending) {
+                    btn.disabled = true;
+                    btn.innerText = "未开始";
+                }
+            } else {
+                cdEl.innerText = "抢课进行中";
+                document.getElementById("statusText").innerText = "进行中";
+                if (!done && !pending) {
+                    btn.disabled = false;
+                    btn.innerText = "抢课";
+                }
+            }
+        }
+
+        // 重新拉一次配额，抢课后刷新剩余名额
+        async function refreshQuota() {
+            const q = await fetch(API + "/api/CourseSelection/quota/" + courseId, {
+                method: "POST",
+                headers: headers
+            });
+            const qq = await q.json();
+            if (qq.success) {
+                quota = qq.data;
+                document.getElementById("stock").innerText = qq.data.stock;
+            }
+        }
+
+        // 轮询抢课结果：500ms 一次，最多 20 次（10 秒）
+        async function pollStatus() {
+            for (let i = 0; i < 20; i++) {
+                await sleep(500);
+                const resp = await fetch(API + "/api/CourseSelection/status/" + courseId, { headers: headers });
+                if (resp.status === 401) {
+                    localStorage.removeItem("token");
+                    window.location.href = "login.html";
+                    return;
+                }
+                const r = await resp.json();
+                if (!r.success) continue;            // 查询本身出错，下一轮再试
+
+                if (r.data.status === "Success") {
+                    done = true;
+                    pending = false;
+                    btn.innerText = "已抢到";
+                    say("抢课成功！订单号：" + r.data.orderId, "ok");
+                    return;
+                }
+                if (r.data.status === "Failed") {
+                    pending = false;
+                    done = false;
+                    btn.innerText = "抢课";
+                    btn.disabled = false;            // 失败可重试
+                    say("抢课失败：" + (r.data.message || "请稍后重试"), "err");
+                    return;
+                }
+                // Pending / None：还没结果，继续下一轮
+            }
+            // 10 秒仍没结果：保持锁定，让用户稍后刷新页面
+            btn.innerText = "处理中";
+            say("仍在处理中，请稍后刷新页面查看结果", "");
+        }
+
+        // 6. 点抢课
+        btn.addEventListener("click", async function () {
+            if (done) return;
+            btn.disabled = true;      // 防止连点
+            btn.innerText = "抢课中...";
+            try {
+                const resp = await fetch(API + "/api/CourseSelection/" + courseId, {
+                    method: "POST",
+                    headers: headers
+                });
+                if (resp.status === 401) {
+                    localStorage.removeItem("token");
+                    window.location.href = "login.html";
+                    return;
+                }
+
+                const result = await resp.json();
+                if (result.success) {
+                    // 受理成功 ≠ 抢到：进入排队，开始轮询最终结果
+                    pending = true;
+                    btn.innerText = "排队中...";
+                    say("已进入排队，正在为你抢课...", "");
+
+                    await refreshQuota();     // 名额此刻已扣掉，先刷新数字
+                    await pollStatus();       // 500ms 一次，最多等 10 秒
+                } else {
+                    say("抢课失败：" + result.errorMsg, "err");
+                    if (!done) {
+                        btn.innerText = "抢课";
+                        btn.disabled = false;    // 失败可重试
+                    }
+                }
+            } catch (e) {
+                say("网络异常，请确认后端已启动", "err");
+                if (!done && !pending) btn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

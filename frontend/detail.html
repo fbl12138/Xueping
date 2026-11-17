@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>学评 · 课程评价</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <div>
+                <h1 id="courseName">加载中...</h1>
+                <div class="sub">课程评价 · 点赞红心 / 关注作者 / 共同关注</div>
+                <div class="sub" id="uvInfo"></div>
+            </div>
+            <a class="btn btn-ghost btn-sm" href="index.html">返回列表</a>
+        </div>
+
+        <!-- 发评价 -->
+        <div class="card">
+            <textarea id="content" maxlength="500" placeholder="说说你对这门课的看法…"></textarea>
+            <div class="row">
+                <select id="score">
+                    <option value="5">5 分 · 非常满意</option>
+                    <option value="4">4 分 · 满意</option>
+                    <option value="3" selected>3 分 · 一般</option>
+                    <option value="2">2 分 · 不满意</option>
+                    <option value="1">1 分 · 很差</option>
+                </select>
+                <button class="btn" id="submitBtn">发表评价</button>
+            </div>
+            <p class="msg" id="formMsg"></p>
+        </div>
+
+        <!-- 评价列表 -->
+        <div class="card">
+            <div id="listBox"><div class="placeholder">加载中...</div></div>
+            <p class="msg" id="listMsg"></p>
+        </div>
+    </div>
+
+    <script>
+        const API = "http://127.0.0.1:5242";
+
+        // 1. 从 URL 取 courseId：detail.html?courseId=1
+        const params = new URLSearchParams(location.search);
+        const courseId = params.get("courseId");
+        const token = localStorage.getItem("token");
+        if (!token) {
+            window.location.href = "login.html";
+        }
+
+        const headers = { "Authorization": "Bearer " + token };
+        const listBox = document.getElementById("listBox");
+        const formMsg = document.getElementById("formMsg");
+        const listMsg = document.getElementById("listMsg");
+        const contentEl = document.getElementById("content");
+        const scoreEl = document.getElementById("score");
+        const submitBtn = document.getElementById("submitBtn");
+
+        // 2. 从 JWT 里解出当前 userId：只显示「自己的」评价才能删（后端也会拦，这是体验优化）
+        function readUserId(t) {
+            try {
+                const part = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+                const padded = part + "=".repeat((4 - part.length % 4) % 4);
+                const json = decodeURIComponent(Array.prototype.map.call(atob(padded), function (c) {
+                    return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(""));
+                return String(JSON.parse(json).userId);
+            } catch (e) {
+                return null;
+            }
+        }
+        const myUserId = readUserId(token);
+
+        function esc(s) {
+            const d = document.createElement("div");
+            d.textContent = s == null ? "" : s;
+            return d.innerHTML;
+        }
+
+        function say(el, text, type) {
+            el.className = "msg" + (type ? " " + type : "");
+            el.innerText = text;
+        }
+
+        function stars(score) {
+            const n = Math.max(0, Math.min(5, Number(score) || 0));
+            return "★".repeat(n) + "☆".repeat(5 - n);
+        }
+
+        function fmtTime(s) {
+            const d = new Date(s);
+            return isNaN(d.getTime()) ? "" : d.toLocaleString();
+        }
+
+        // 统一的 401 处理
+        function kickIf401(resp) {
+            if (resp.status === 401) {
+                localStorage.removeItem("token");
+                window.location.href = "login.html";
+                return true;
+            }
+            return false;
+        }
+
+        // 3. 拉课程名
+        (async function loadCourse() {
+            try {
+                const resp = await fetch(API + "/api/Course/" + courseId, { headers: headers });
+                if (kickIf401(resp)) return;
+                const result = await resp.json();
+                if (result.success) {
+                    document.getElementById("courseName").innerText = result.data.name;
+                }
+            } catch (e) {
+                document.getElementById("courseName").innerText = "课程加载失败";
+            }
+        })();
+
+        // 3.1 拉课程访问量（UV）：旁路统计，失败静默不影响页面
+        (async function loadUv() {
+            try {
+                const resp = await fetch(API + "/api/Course/" + courseId + "/uv", { headers: headers });
+                if (resp.status === 401) return;
+                const result = await resp.json();
+                if (!result.success) return;
+                document.getElementById("uvInfo").innerText =
+                    "今日访问 " + result.data.todayUv + " · 累计访问 " + result.data.totalUv;
+            } catch (e) {
+                // UV 展示失败静默
+            }
+        })();
+
+        // 4. 拉评价列表（每次点赞/发表/删除后都重拉，数字以后端为准）
+        async function loadList() {
+            try {
+                const resp = await fetch(API + "/api/Review/course/" + courseId, { headers: headers });
+                if (kickIf401(resp)) return;
+                const result = await resp.json();
+                if (!result.success) {
+                    listBox.innerHTML = `<div class="placeholder">${esc(result.errorMsg || "加载失败")}</div>`;
+                    return;
+                }
+                render(result.data);
+                say(listMsg, "");
+            } catch (e) {
+                listBox.innerHTML = `<div class="placeholder">网络异常，请确认后端已启动</div>`;
+            }
+        }
+
+        function render(list) {
+            if (!list || !list.length) {
+                listBox.innerHTML = `<div class="placeholder">还没有评价，来抢沙发～</div>`;
+                return;
+            }
+            listBox.innerHTML = "";
+            list.forEach(function (r) {
+                const own = myUserId != null && String(r.userId) === myUserId;
+                const followHtml = own ? "" :
+                    '<button class="follow-btn" data-follow="' + r.userId + '" title="关注 / 取消关注">+ 关注</button>' +
+                    '<button class="common-btn" data-common="' + r.userId + '" title="查看你们共同关注的人">共同关注</button>';
+                const item = document.createElement("div");
+                item.className = "review";
+                item.innerHTML =
+                    `<div class="review-head">
+                         <div class="author-line">
+                             <span class="review-nick">${esc(r.nickName || ("用户 " + r.userId))}</span>
+                             ${followHtml}
+                         </div>
+                         <span class="review-meta">${esc(fmtTime(r.createdAt))}</span>
+                     </div>
+                     <div class="review-stars">${stars(r.score)} ${r.score} 分</div>
+                     <div class="review-body">${esc(r.content)}</div>
+                     <div class="review-actions">
+                         <button class="like-btn${r.liked ? " liked" : ""}" data-id="${r.id}" title="点赞 / 取消点赞">
+                             ${r.liked ? "♥" : "♡"} <span class="like-count" data-top="${r.id}" title="查看最近点赞的人">${r.likeCount}</span>
+                         </button>
+                         ${own ? `<button class="btn btn-ghost btn-sm" data-del="${r.id}">删除</button>` : ""}
+                     </div>
+                     <div class="like-panel" hidden></div>
+                     <div class="common-panel" hidden></div>`;
+                listBox.appendChild(item);
+            });
+            loadFollowStates(list);
+        }
+
+        // 4.1 关注状态：先按缓存即时上色，再逐个跟后端核实（每个作者只查一次）
+        const followCache = new Map();
+
+        function paintFollow(userId, following) {
+            document.querySelectorAll('[data-follow="' + userId + '"]').forEach(function (b) {
+                b.classList.toggle("following", following);
+                b.innerText = following ? "已关注" : "+ 关注";
+            });
+        }
+
+        async function loadFollowStates(list) {
+            const ids = [];
+            (list || []).forEach(function (r) {
+                const id = String(r.userId);
+                if (myUserId != null && id === myUserId) return;
+                if (ids.indexOf(id) < 0) ids.push(id);
+            });
+            ids.forEach(function (id) {
+                if (followCache.has(id)) paintFollow(id, followCache.get(id));
+            });
+            await Promise.all(ids.map(async function (id) {
+                try {
+                    const resp = await fetch(API + "/api/Follow/isfollow/" + id, { headers: headers });
+                    if (kickIf401(resp)) return;
+                    const result = await resp.json();
+                    if (result.success) {
+                        followCache.set(id, !!result.data);
+                        paintFollow(id, !!result.data);
+                    }
+                } catch (e) { /* 静默：关注状态查不到不影响看评价 */ }
+            }));
+        }
+
+        // 5. 点「数字」展开：拉最近点赞的人（Top5）。按需请求、不缓存，保证刷新后是新的
+        async function loadRank(reviewId, panel) {
+            panel.innerHTML = `<div class="rank-loading">加载中...</div>`;
+            try {
+                const resp = await fetch(API + "/api/ReviewLike/top/" + reviewId + "?count=5", { headers: headers });
+                if (kickIf401(resp)) return;
+                const result = await resp.json();
+                if (!result.success) {
+                    panel.innerHTML = `<div class="rank-loading">${esc(result.errorMsg || "加载失败")}</div>`;
+                    return;
+                }
+                const list = result.data || [];
+                if (!list.length) {
+                    panel.innerHTML = `<div class="rank-loading">还没有人点赞</div>`;
+                    return;
+                }
+                panel.innerHTML = `<div class="rank-title">最近点赞的 ${list.length} 人</div>
+                    <div class="rank-list">${list.map(u => `<span class="rank-chip">${esc(u.nickName || ("用户 " + u.id))}</span>`).join("")}</div>`;
+            } catch (err) {
+                panel.innerHTML = `<div class="rank-loading">网络异常，请确认后端已启动</div>`;
+            }
+        }
+
+        // 6. 列表内事件委托：关注 / 共同关注 / 看赞榜 / 点赞 / 取消点赞 / 删除
+        listBox.addEventListener("click", async function (e) {
+            const followBtn = e.target.closest(".follow-btn");
+            const commonBtn = e.target.closest(".common-btn");
+            const countEl = e.target.closest(".like-count");
+            const likeBtn = e.target.closest(".like-btn");
+            const delBtn = e.target.closest("[data-del]");
+
+            // 关注 / 取关：同一个接口两种方法
+            if (followBtn) {
+                const id = followBtn.dataset.follow;
+                const following = followBtn.classList.contains("following");
+                followBtn.disabled = true;
+                try {
+                    const resp = await fetch(API + "/api/Follow/" + id, {
+                        method: following ? "DELETE" : "POST",
+                        headers: headers
+                    });
+                    if (kickIf401(resp)) return;
+                    const result = await resp.json();
+                    if (result.success) {
+                        followCache.set(String(id), !following);
+                        paintFollow(String(id), !following);
+                        say(listMsg, !following ? "已关注该用户" : "已取消关注", "ok");
+                    } else {
+                        say(listMsg, "操作失败：" + result.errorMsg, "err");
+                    }
+                } catch (err) {
+                    say(listMsg, "网络异常，请确认后端已启动", "err");
+                }
+                followBtn.disabled = false;
+                return;
+            }
+
+            // 共同关注：按需展开，收起不请求
+            if (commonBtn) {
+                const id = commonBtn.dataset.common;
+                const panel = commonBtn.closest(".review").querySelector(".common-panel");
+                if (!panel.hasAttribute("hidden")) {
+                    panel.setAttribute("hidden", "");
+                    return;
+                }
+                panel.removeAttribute("hidden");
+                panel.innerHTML = '<div class="rank-loading">加载中...</div>';
+                try {
+                    const resp = await fetch(API + "/api/Follow/common/" + id, { headers: headers });
+                    if (kickIf401(resp)) return;
+                    const result = await resp.json();
+                    if (!result.success) {
+                        panel.innerHTML = '<div class="rank-loading">' + esc(result.errorMsg || "加载失败") + '</div>';
+                        return;
+                    }
+                    const list = result.data || [];
+                    panel.innerHTML = list.length
+                        ? '<div class="rank-title">你们共同关注了 ' + list.length + ' 人</div><div class="rank-list">' +
+                          list.map(function (u) {
+                              return '<span class="rank-chip">' + esc(u.nickName || ("用户 " + u.id)) + '</span>';
+                          }).join("") + '</div>'
+                        : '<div class="rank-loading">你们还没有共同关注的人</div>';
+                } catch (err) {
+                    panel.innerHTML = '<div class="rank-loading">网络异常，请确认后端已启动</div>';
+                }
+                return;
+            }
+
+            // 点数字 → 展开/收起「最近点赞的人」（不触发点赞）
+            if (countEl) {
+                const panel = countEl.closest(".review").querySelector(".like-panel");
+                if (panel.hasAttribute("hidden")) {
+                    panel.removeAttribute("hidden");
+                    await loadRank(countEl.dataset.top, panel);
+                } else {
+                    panel.setAttribute("hidden", "");
+                }
+                return;
+            }
+
+            if (likeBtn) {
+                const id = likeBtn.dataset.id;
+                const liked = likeBtn.classList.contains("liked");
+                likeBtn.disabled = true;
+                try {
+                    // 已赞就 DELETE，未赞就 POST，是同一个接口的两种方法
+                    const resp = await fetch(API + "/api/ReviewLike/" + id, {
+                        method: liked ? "DELETE" : "POST",
+                        headers: headers
+                    });
+                    if (kickIf401(resp)) return;
+                    const result = await resp.json();
+                    if (result.success) {
+                        await loadList();      // 重拉：LikeCount 是后端算的，别只在本地 +1
+                        return;
+                    }
+                    say(listMsg, "操作失败：" + result.errorMsg, "err");
+                } catch (err) {
+                    say(listMsg, "网络异常，请确认后端已启动", "err");
+                }
+                likeBtn.disabled = false;
+                return;
+            }
+
+            if (delBtn) {
+                const id = delBtn.dataset.del;
+                if (!confirm("确定删除这条评价？")) return;
+                delBtn.disabled = true;
+                try {
+                    const resp = await fetch(API + "/api/Review/" + id, { method: "DELETE", headers: headers });
+                    if (kickIf401(resp)) return;
+                    const result = await resp.json();
+                    if (result.success) {
+                        say(listMsg, "已删除", "ok");
+                        await loadList();
+                        return;
+                    }
+                    say(listMsg, "删除失败：" + result.errorMsg, "err");
+                } catch (err) {
+                    say(listMsg, "网络异常，请确认后端已启动", "err");
+                }
+                delBtn.disabled = false;
+            }
+        });
+
+        // 7. 发表评价
+        submitBtn.addEventListener("click", async function () {
+            const content = contentEl.value.trim();
+            const score = Number(scoreEl.value);
+
+            if (content.length < 2) { say(formMsg, "评价内容至少 2 个字", "err"); contentEl.focus(); return; }
+
+            submitBtn.disabled = true;
+            submitBtn.innerText = "提交中...";
+            try {
+                // courseId 从 URL 取到是字符串，这里转成 Number 再发
+                const resp = await fetch(API + "/api/Review", {
+                    method: "POST",
+                    headers: Object.assign({ "Content-Type": "application/json" }, headers),
+                    body: JSON.stringify({ courseId: Number(courseId), content: content, score: score })
+                });
+                if (kickIf401(resp)) return;
+                const result = await resp.json();
+                if (result.success) {
+                    contentEl.value = "";
+                    say(formMsg, "发表成功", "ok");
+                    await loadList();
+                } else {
+                    say(formMsg, "发表失败：" + result.errorMsg, "err");
+                }
+            } catch (e) {
+                say(formMsg, "网络异常，请确认后端已启动", "err");
+            }
+            submitBtn.disabled = false;
+            submitBtn.innerText = "发表评价";
+        });
+
+        // 8. 进页面先拉列表
+        loadList();
+    </script>
+</body>
+</html>

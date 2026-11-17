@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>学评 · 课程列表</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <div>
+                <h1>学评课程列表</h1>
+                <div class="sub">点「查看评价」看课程评价，点「去抢课」进入抢课页</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="logoutBtn">退出登录</button>
+        </div>
+
+        <!-- 每日签到（Bitmap）：本月日历 + 连续天数 -->
+        <div class="card">
+            <div class="sign-head">
+                <div class="sign-title">每日签到</div>
+                <div class="sign-stat">连续签到 <span class="stock" id="signStreak">-</span> 天 · 本月已签 <span id="signCount">-</span> 天</div>
+            </div>
+            <div class="sign-calendar" id="signCalendar"></div>
+            <div class="row">
+                <button class="btn" id="signBtn" disabled>签到</button>
+            </div>
+            <p class="msg" id="signMsg"></p>
+        </div>
+
+        <!-- 发动态 -->
+        <div class="card">
+            <textarea id="postContent" maxlength="1000" placeholder="分享点什么…（最多 1000 字）"></textarea>
+            <div class="row">
+                <button class="btn" id="publishBtn">发布动态</button>
+            </div>
+            <p class="msg" id="postMsg"></p>
+        </div>
+
+        <!-- 动态 Feed：关注的人的动态推送在这里 -->
+        <div class="card">
+            <div id="feedBox"><div class="placeholder">加载中...</div></div>
+            <p class="msg" id="feedMsg"></p>
+            <button class="btn btn-ghost btn-sm" id="feedMoreBtn" hidden>加载更多</button>
+        </div>
+
+        <div class="card">
+            <div id="listBox"><div class="placeholder">加载中...</div></div>
+        </div>
+        <p class="msg" id="msg"></p>
+    </div>
+
+    <script>
+        const API = "http://127.0.0.1:5242";
+
+        // 1. 取 token；没有就跳回登录页
+        const token = localStorage.getItem("token");
+        if (!token) {
+            window.location.href = "login.html";
+        }
+
+        const msgEl = document.getElementById("msg");
+        const listBox = document.getElementById("listBox");
+        const postContentEl = document.getElementById("postContent");
+        const postMsg = document.getElementById("postMsg");
+        const publishBtn = document.getElementById("publishBtn");
+        const feedBox = document.getElementById("feedBox");
+        const feedMsg = document.getElementById("feedMsg");
+        const feedMoreBtn = document.getElementById("feedMoreBtn");
+        const signBtn = document.getElementById("signBtn");
+        const signStreak = document.getElementById("signStreak");
+        const signCount = document.getElementById("signCount");
+        const signCalendar = document.getElementById("signCalendar");
+        const signMsg = document.getElementById("signMsg");
+
+        // 签到日历的月份基准（客户端只负责画格子，已签日期以后端返回为准）
+        const now = new Date();
+        const YEAR = now.getFullYear();
+        const MONTH = now.getMonth();   // 0-based
+        const TODAY = now.getDate();
+
+        // 转义后再插入 HTML，防止评价内容里的 < > 破坏页面结构
+        function esc(s) {
+            const d = document.createElement("div");
+            d.textContent = s == null ? "" : s;
+            return d.innerHTML;
+        }
+
+        function say(el, text, type) {
+            el.className = "msg" + (type ? " " + type : "");
+            el.innerText = text;
+        }
+
+        function fmtTime(s) {
+            const d = new Date(s);
+            return isNaN(d.getTime()) ? "" : d.toLocaleString();
+        }
+
+        // 统一的 401 处理
+        function kickIf401(resp) {
+            if (resp.status === 401) {
+                localStorage.removeItem("token");
+                window.location.href = "login.html";
+                return true;
+            }
+            return false;
+        }
+
+        // Feed 分页游标：lastId = 上一页最后一条的 score（毫秒时间戳），
+        // offset = 上一页末尾与 lastId 同分且已展示的条数（防止新推送/同分抖动造成重复）
+        const FEED_PAGE_SIZE = 5;
+        const feedState = { lastId: null, offset: 0, hasMore: true, loading: false };
+        let feedItems = [];
+
+        function renderFeed() {
+            if (!feedItems.length) {
+                feedBox.innerHTML = `<div class="placeholder">还没有动态，关注几个人或自己发一条吧</div>`;
+                return;
+            }
+            feedBox.innerHTML = feedItems.map(function (p) {
+                return `<div class="post">
+                            <div class="post-head">
+                                <span class="post-nick">${esc(p.nickName || ("用户 " + p.userId))}</span>
+                                <span class="post-meta">${esc(fmtTime(p.createdAt))}</span>
+                            </div>
+                            <div class="post-body">${esc(p.content)}</div>
+                        </div>`;
+            }).join("");
+        }
+
+        // 拉取 Feed：reset=true 从第一页重拉，否则按游标取下一页
+        async function loadFeed(reset) {
+            if (feedState.loading) return;
+            feedState.loading = true;
+            feedMoreBtn.disabled = true;
+            if (reset) {
+                feedState.lastId = null;
+                feedState.offset = 0;
+                feedState.hasMore = true;
+                feedItems = [];
+            }
+            try {
+                let url = API + "/api/Feed?count=" + FEED_PAGE_SIZE;
+                if (feedState.lastId != null) {
+                    url += "&lastId=" + feedState.lastId + "&offset=" + feedState.offset;
+                }
+                const resp = await fetch(url, { headers: { "Authorization": "Bearer " + token } });
+                if (kickIf401(resp)) return;
+                const result = await resp.json();
+                if (!result.success) {
+                    say(feedMsg, result.errorMsg || "加载失败", "err");
+                    return;
+                }
+                const page = result.data || {};
+                const list = page.list || [];
+                feedItems = feedItems.concat(list);
+                // 游标只在有数据时前进：空页不能再覆盖 lastId
+                if (list.length > 0) {
+                    feedState.lastId = page.minTime;
+                    feedState.offset = page.offset;
+                }
+                feedState.hasMore = list.length === FEED_PAGE_SIZE;
+                renderFeed();
+                say(feedMsg, "");
+            } catch (e) {
+                feedBox.innerHTML = `<div class="placeholder">网络异常，请确认后端已启动</div>`;
+            } finally {
+                feedState.loading = false;
+                feedMoreBtn.disabled = false;
+                feedMoreBtn.hidden = !feedState.hasMore || feedItems.length === 0;
+            }
+        }
+
+        feedMoreBtn.addEventListener("click", function () {
+            loadFeed(false);
+        });
+
+        // ---- 签到（Bitmap）----
+        function renderSignCalendar(signedDays) {
+            const signed = new Set(signedDays || []);
+            const firstWeekday = (new Date(YEAR, MONTH, 1).getDay() + 6) % 7;   // 周一作为第一列
+            const daysInMonth = new Date(YEAR, MONTH + 1, 0).getDate();
+            const cells = [];
+            ["一", "二", "三", "四", "五", "六", "日"].forEach(function (w) {
+                cells.push(`<div class="sign-week">${w}</div>`);
+            });
+            for (let i = 0; i < firstWeekday; i++) cells.push(`<div class="sign-day empty"></div>`);
+            for (let d = 1; d <= daysInMonth; d++) {
+                const cls = "sign-day" + (signed.has(d) ? " signed" : "") + (d === TODAY ? " today" : "");
+                cells.push(`<div class="${cls}">${d}</div>`);
+            }
+            signCalendar.innerHTML = cells.join("");
+        }
+
+        async function loadSignStatus() {
+            try {
+                const resp = await fetch(API + "/api/Sign/status", { headers: { "Authorization": "Bearer " + token } });
+                if (kickIf401(resp)) return;
+                const result = await resp.json();
+                if (!result.success) {
+                    say(signMsg, result.errorMsg || "签到状态加载失败", "err");
+                    return;
+                }
+                const data = result.data || {};
+                const days = data.signedDays || [];
+                signStreak.innerText = data.consecutiveDays || 0;
+                signCount.innerText = days.length;
+                renderSignCalendar(days);
+
+                const signedToday = days.indexOf(TODAY) >= 0;
+                signBtn.disabled = signedToday;
+                signBtn.innerText = signedToday ? "今天已签到" : "签到";
+            } catch (e) {
+                say(signMsg, "签到状态加载失败，请确认后端已启动", "err");
+            }
+        }
+
+        signBtn.addEventListener("click", async function () {
+            signBtn.disabled = true;                  // 防连点
+            try {
+                const resp = await fetch(API + "/api/Sign", {
+                    method: "POST",
+                    headers: { "Authorization": "Bearer " + token }
+                });
+                if (kickIf401(resp)) return;
+                const result = await resp.json();
+                say(signMsg, result.success ? "签到成功" : (result.errorMsg || "签到失败"), result.success ? "ok" : "err");
+                await loadSignStatus();               // 状态以后端为准，不本地改数字
+            } catch (e) {
+                say(signMsg, "网络异常，请确认后端已启动", "err");
+                signBtn.disabled = false;
+            }
+        });
+
+        // 发动态：成功后就重拉 Feed（顺序/数据以后端为准，不在本地插一条假数据）
+        publishBtn.addEventListener("click", async function () {
+            const content = postContentEl.value.trim();
+            if (!content) {
+                say(postMsg, "先写点什么吧", "err");
+                return;
+            }
+            publishBtn.disabled = true;
+            try {
+                const resp = await fetch(API + "/api/Feed", {
+                    method: "POST",
+                    headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: content })
+                });
+                if (kickIf401(resp)) return;
+                const result = await resp.json();
+                if (!result.success) {
+                    say(postMsg, result.errorMsg || "发布失败", "err");
+                    return;
+                }
+                postContentEl.value = "";
+                say(postMsg, "发布成功", "ok");
+                await loadFeed(true);      // 重拉第一页并清空游标：自己也在接收者里，新动态会出现在最上面
+            } catch (e) {
+                say(postMsg, "网络异常，请确认后端已启动", "err");
+            } finally {
+                publishBtn.disabled = false;
+            }
+        });
+
+        document.getElementById("logoutBtn").addEventListener("click", function () {
+            localStorage.removeItem("token");
+            window.location.href = "login.html";
+        });
+
+        loadFeed(true);      // Feed 与课程列表并行加载，互不阻塞
+        loadSignStatus();    // 签到状态同样是独立请求
+
+        (async function load() {
+            try {
+                // 2. 带 token 请求课程列表
+                const resp = await fetch(API + "/api/Course", {
+                    method: "GET",
+                    // JWT Bearer 要求带 Bearer 前缀
+                    headers: { "Authorization": "Bearer " + token }
+                });
+
+                // 先判断状态码，再解析 body：401 提前返回，避免 resp.json() 抛错
+                if (resp.status === 401) {
+                    localStorage.removeItem("token");     // 踢下线：清掉失效 token
+                    window.location.href = "login.html";  // 跳回登录页
+                    return;                               // 停在这，不再往下渲染
+                }
+
+                const result = await resp.json();
+                if (!result.success) {
+                    listBox.innerHTML = `<div class="placeholder">${esc(result.errorMsg || "加载失败")}</div>`;
+                    return;
+                }
+                if (!result.data.length) {
+                    listBox.innerHTML = `<div class="placeholder">暂无课程</div>`;
+                    return;
+                }
+
+                // 3. 渲染课程列表：CourseDto 有 id / name
+                listBox.innerHTML = "";
+                result.data.forEach(function (course) {
+                    const item = document.createElement("div");
+                    item.className = "course-item";
+                    item.innerHTML =
+                        `<div class="course-name">${esc(course.name)}</div>
+                         <div class="course-actions">
+                             <a class="btn btn-ghost btn-sm" href="seckill.html?courseId=${course.id}">去抢课</a>
+                             <a class="btn btn-sm" href="detail.html?courseId=${course.id}">查看评价</a>
+                         </div>`;
+                    listBox.appendChild(item);
+                });
+            } catch (e) {
+                listBox.innerHTML = `<div class="placeholder">网络异常，请确认后端已启动</div>`;
+            }
+        })();
+    </script>
+</body>
+</html>

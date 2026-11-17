@@ -1,0 +1,32 @@
+# 编译产物
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+
+# IDE / 编辑器
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# 日志
+logs/
+*.log
+
+# 本地私有配置：真实连接串与密钥放这里，参考 appsettings.Example.json
+appsettings.Local.json
+appsettings.*.Local.json
+appsettings.Production.json
+
+# 本地学习示例（含本机连接参数，不入库）
+rabbitmq-samples/
+
+# 系统与杂项
+.DS_Store
+Thumbs.db
+*.db
+*.sqlite

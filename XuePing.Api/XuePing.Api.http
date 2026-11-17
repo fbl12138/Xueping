@@ -1,0 +1,55 @@
+@XuePing.Api_HostAddress = http://localhost:5242
+@token = 粘贴登录接口返回的 token
+
+### 1. 获取验证码（开发模式直接返回验证码）
+POST {{XuePing.Api_HostAddress}}/api/User/code
+Content-Type: application/json
+
+{
+  "phone": "13800000001"
+}
+
+### 2. 登录，拿到 token（填到上面的 @token）
+POST {{XuePing.Api_HostAddress}}/api/User/login
+Content-Type: application/json
+
+{
+  "phone": "13800000001",
+  "code": "123456"
+}
+
+### 3. 课程列表
+GET {{XuePing.Api_HostAddress}}/api/Course
+Authorization: Bearer {{token}}
+
+### 4. 课程详情（逻辑过期缓存）
+GET {{XuePing.Api_HostAddress}}/api/Course/1
+Authorization: Bearer {{token}}
+
+### 5. 课程 UV（HyperLogLog）
+GET {{XuePing.Api_HostAddress}}/api/Course/1/uv
+Authorization: Bearer {{token}}
+
+### 6. 课程评价列表
+GET {{XuePing.Api_HostAddress}}/api/Review/course/1
+Authorization: Bearer {{token}}
+
+### 7. 抢课名额
+POST {{XuePing.Api_HostAddress}}/api/CourseSelection/quota/1
+Authorization: Bearer {{token}}
+
+### 8. 抢课（Lua 原子扣减 + 入队，返回排队中）
+POST {{XuePing.Api_HostAddress}}/api/CourseSelection/1
+Authorization: Bearer {{token}}
+
+### 9. 抢课结果轮询
+GET {{XuePing.Api_HostAddress}}/api/CourseSelection/status/1
+Authorization: Bearer {{token}}
+
+### 10. 签到状态（Bitmap）
+GET {{XuePing.Api_HostAddress}}/api/Sign/status
+Authorization: Bearer {{token}}
+
+### 11. 关注动态 Feed
+GET {{XuePing.Api_HostAddress}}/api/Feed?count=5
+Authorization: Bearer {{token}}

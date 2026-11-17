@@ -1,0 +1,152 @@
+/* 学评 · 公共样式（index / login / seckill / detail 四页共用） */
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: #f4f5f7;
+    color: #1f2329;
+    font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+.page { max-width: 760px; margin: 0 auto; padding: 24px 16px 56px; }
+
+/* 顶部标题栏 */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.topbar h1 { font-size: 20px; margin: 0; }
+.topbar .sub { color: #8a9099; font-size: 13px; margin-top: 2px; }
+
+/* 卡片 */
+.card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 10px rgba(0, 0, 0, .06); margin-bottom: 14px; }
+
+/* 按钮 */
+.btn {
+    border: 0; border-radius: 8px; padding: 10px 18px;
+    font-size: 15px; font-family: inherit; cursor: pointer;
+    background: #ff6633; color: #fff; transition: background .2s;
+}
+.btn:hover:not(:disabled) { background: #e95a29; }
+.btn:disabled { background: #c9ced6; cursor: not-allowed; }
+.btn-ghost { background: #fff; color: #ff6633; border: 1px solid #ff6633; }
+.btn-ghost:hover:not(:disabled) { background: #fff7f3; }
+.btn-ghost:disabled { background: #fff; color: #c9ced6; border-color: #c9ced6; }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+
+/* 表单 */
+input, textarea, select {
+    width: 100%; padding: 10px 12px;
+    border: 1px solid #dcdfe6; border-radius: 8px;
+    font-size: 15px; font-family: inherit; background: #fff; outline: none;
+    transition: border-color .2s, box-shadow .2s;
+}
+input:focus, textarea:focus, select:focus {
+    border-color: #ff6633; box-shadow: 0 0 0 3px rgba(255, 102, 51, .12);
+}
+textarea { resize: vertical; min-height: 84px; }
+
+/* 一行两列：左边撑满，右边按钮不拉伸 */
+.row { display: flex; gap: 10px; margin-top: 10px; }
+.row > * { flex: 1; min-width: 0; }
+.row .btn { flex: 0 0 auto; }
+
+/* 提示文字 */
+.msg { font-size: 13px; margin: 10px 0 0; min-height: 20px; color: #5a6472; }
+.msg.ok { color: #22a86b; }
+.msg.err { color: #e5433c; }
+
+/* 加载 / 空态占位 */
+.placeholder { text-align: center; color: #a2a9b3; padding: 24px 0; font-size: 14px; }
+
+/* 课程列表 */
+.course-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid #f0f1f3; }
+.course-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.course-name { font-weight: 600; }
+.course-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+
+/* 抢课页的数字与倒计时 */
+.stock { font-size: 20px; font-weight: 700; color: #ff6633; }
+.countdown { font-size: 22px; font-weight: 700; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+
+/* 评价列表 */
+.review { border-bottom: 1px solid #f0f1f3; padding: 14px 0; }
+.review:last-child { border-bottom: 0; padding-bottom: 0; }
+.review-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.review-nick { font-weight: 600; }
+.review-meta { color: #a2a9b3; font-size: 12px; white-space: nowrap; }
+.review-stars { color: #ff9d00; font-size: 13px; margin-top: 2px; }
+.review-body { margin: 6px 0 10px; white-space: pre-wrap; word-break: break-word; }
+.review-actions { display: flex; align-items: center; gap: 14px; }
+
+/* 点赞按钮 */
+.like-btn {
+    border: 0; background: none; padding: 0;
+    font-size: 14px; font-family: inherit; cursor: pointer;
+    color: #8a9099; display: inline-flex; align-items: center; gap: 5px;
+    transition: color .15s;
+}
+.like-btn:hover:not(:disabled) { color: #ff3b5c; }
+.like-btn.liked { color: #ff3b5c; }
+.like-btn:disabled { opacity: .5; cursor: wait; }
+
+/* 点赞数字（点它展开「最近点赞的人」） */
+.like-count { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.like-count:hover { text-decoration-style: solid; }
+
+/* 最近点赞的人面板 */
+.like-panel { margin-top: 10px; padding: 10px 12px; background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 8px; }
+.like-panel[hidden] { display: none; }
+.rank-title { font-size: 12px; color: #a2a9b3; margin-bottom: 8px; }
+.rank-loading { font-size: 13px; color: #a2a9b3; }
+.rank-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.rank-chip { padding: 2px 8px; background: #fff; border: 1px solid #e7e9ec; border-radius: 999px; font-size: 12px; color: #4b5158; }
+
+/* 作者行：昵称 + 关注 / 共同关注 */
+.author-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+
+/* 关注按钮：未关注 = 描边；已关注 = 灰底 */
+.follow-btn {
+    border: 1px solid #ff6633; background: #fff; color: #ff6633;
+    border-radius: 999px; padding: 1px 10px; line-height: 1.7;
+    font-size: 12px; font-family: inherit; cursor: pointer;
+    white-space: nowrap; transition: background .15s, color .15s, border-color .15s;
+}
+.follow-btn:hover:not(:disabled) { background: #fff7f3; }
+.follow-btn.following { background: #f2f3f5; border-color: #dcdfe6; color: #8a9099; }
+.follow-btn:disabled { opacity: .5; cursor: wait; }
+
+/* 共同关注：文字按钮 */
+.common-btn {
+    border: 0; background: none; padding: 0;
+    font-size: 12px; font-family: inherit; color: #8a9099; cursor: pointer;
+    text-decoration: underline dotted; text-underline-offset: 3px;
+    white-space: nowrap;
+}
+.common-btn:hover { color: #ff6633; }
+
+/* 共同关注面板 */
+.common-panel { margin-top: 10px; padding: 10px 12px; background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 8px; }
+.common-panel[hidden] { display: none; }
+
+/* 动态 Feed */
+.post { border-bottom: 1px solid #f0f1f3; padding: 14px 0; }
+.post:last-child { border-bottom: 0; padding-bottom: 0; }
+.post-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.post-nick { font-weight: 600; }
+.post-meta { color: #a2a9b3; font-size: 12px; white-space: nowrap; }
+.post-body { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
+
+/* 签到日历 */
+.sign-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.sign-title { font-weight: 600; }
+.sign-stat { color: #8a9099; font-size: 13px; }
+.sign-stat .stock { font-size: 16px; }
+.sign-calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 12px 0 2px; }
+.sign-week { text-align: center; font-size: 12px; color: #a2a9b3; padding: 2px 0; }
+.sign-day { text-align: center; font-size: 13px; padding: 6px 0; border-radius: 6px; background: #f7f8fa; color: #4b5158; }
+.sign-day.signed { background: #fff1ea; color: #ff6633; font-weight: 600; }
+.sign-day.today { outline: 1px solid #ff6633; }
+.sign-day.empty { background: transparent; }
+
+a { color: #ff6633; text-decoration: none; }
+a:hover { text-decoration: underline; }

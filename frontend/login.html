@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>学评 · 登录</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <div>
+                <h1>学评登录</h1>
+                <div class="sub">手机号 + 验证码（开发模式验证码直接返回并自动填入）</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <input id="phone" type="tel" maxlength="11" placeholder="请输入手机号" autocomplete="tel" />
+            <div class="row">
+                <input id="code" type="text" maxlength="6" placeholder="请输入验证码" inputmode="numeric" />
+                <button class="btn btn-ghost" id="sendCodeBtn">获取验证码</button>
+            </div>
+            <button class="btn" id="loginBtn" style="width:100%; margin-top:12px;">登录</button>
+            <p class="msg" id="msg"></p>
+        </div>
+    </div>
+
+    <script>
+        const API = "http://127.0.0.1:5242";
+
+        const phoneEl = document.getElementById("phone");
+        const codeEl = document.getElementById("code");
+        const msgEl = document.getElementById("msg");
+        const sendBtn = document.getElementById("sendCodeBtn");
+        const loginBtn = document.getElementById("loginBtn");
+
+        let sending = false;   // 验证码请求进行中
+        let counting = false;  // 60s 重发倒计时进行中
+
+        function say(text, type) {
+            msgEl.className = "msg" + (type ? " " + type : "");
+            msgEl.innerText = text;
+        }
+
+        async function postJson(url, body) {
+            const resp = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },   // 声明 body 是 JSON
+                body: JSON.stringify(body)                         // 把对象序列化成 JSON 字符串
+            });
+            return resp.json();                                    // 把后端返回的 JSON 解析成对象
+        }
+
+        // 1. 获取验证码
+        sendBtn.addEventListener("click", async function () {
+            if (sending || counting) return;
+
+            const phone = phoneEl.value.trim();
+            if (!/^1\d{10}$/.test(phone)) {
+                say("请输入 11 位手机号", "err");
+                phoneEl.focus();
+                return;
+            }
+
+            sending = true;
+            sendBtn.disabled = true;
+            sendBtn.innerText = "发送中...";
+
+            try {
+                const result = await postJson(API + "/api/User/code", { phone: phone });
+                if (result.success) {
+                    say("验证码：" + result.data, "ok");
+                    codeEl.value = result.data;   // 开发模式后端回传验证码，自动填入省手输
+                    codeEl.focus();
+                    sending = false;
+                    counting = true;
+                    startCountdown();
+                    return;
+                }
+                say("发送失败：" + result.errorMsg, "err");
+            } catch (e) {
+                say("网络异常，请确认后端已启动", "err");
+            }
+
+            sending = false;
+            sendBtn.disabled = false;
+            sendBtn.innerText = "获取验证码";
+        });
+
+        // 2. 60 秒重发倒计时
+        function startCountdown() {
+            let left = 60;
+            sendBtn.disabled = true;
+            sendBtn.innerText = left + "s 后重发";
+            const timer = setInterval(function () {
+                left--;
+                if (left <= 0) {
+                    clearInterval(timer);
+                    counting = false;
+                    sendBtn.disabled = false;
+                    sendBtn.innerText = "获取验证码";
+                } else {
+                    sendBtn.innerText = left + "s 后重发";
+                }
+            }, 1000);
+        }
+
+        // 3. 登录
+        async function doLogin() {
+            const phone = phoneEl.value.trim();
+            const code = codeEl.value.trim();
+            if (!phone) { say("请输入手机号", "err"); phoneEl.focus(); return; }
+            if (!code) { say("请输入验证码", "err"); codeEl.focus(); return; }
+
+            loginBtn.disabled = true;
+            loginBtn.innerText = "登录中...";
+            try {
+                const result = await postJson(API + "/api/User/login", { phone: phone, code: code });
+                if (result.success) {
+                    localStorage.setItem("token", result.data.token);
+                    window.location.href = "index.html";
+                    return;
+                }
+                say("登录失败：" + result.errorMsg, "err");
+            } catch (e) {
+                say("网络异常，请确认后端已启动", "err");
+            }
+            loginBtn.disabled = false;
+            loginBtn.innerText = "登录";
+        }
+
+        loginBtn.addEventListener("click", doLogin);
+        [phoneEl, codeEl].forEach(function (el) {
+            el.addEventListener("keydown", function (e) {
+                if (e.key === "Enter") doLogin();
+            });
+        });
+    </script>
+</body>
+</html>
